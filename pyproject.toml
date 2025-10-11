@@ -1,7 +1,24 @@
 [project]
 name = "dspy-pkg"
 version = "0.1.0"
-description = "Add your description here"
+description = "CLI for browsing and installing DSPy packages from a registry"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
+authors = [ {name = "Kevin Madura", email = "kmadura@gmail.com"}, ]
+
+[project.scripts]
+dspy-pkg = "dspy_pkg.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+dspy_pkg = ["sample_registry/**/*"]

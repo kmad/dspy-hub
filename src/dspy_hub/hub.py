@@ -540,7 +540,8 @@ def _serialize_lm_payload(payload: Any) -> Optional[dict]:
     if isinstance(payload, dict):
         if not payload:
             return None
-        return _sanitize_metadata(payload)
+        sanitized = _sanitize_metadata(payload)
+        return _normalize_lm_metadata(sanitized)
     return {"value": str(payload)}
 
 
@@ -549,7 +550,7 @@ def _serialize_lm_instance(lm: Any) -> Optional[dict]:
         return None
 
     data: Dict[str, Any] = {"class_path": _module_class_path(lm)}
-    for attr in ("model", "model_name", "model_id", "provider", "api_base"):
+    for attr in ("model", "model_name", "model_id"):
         value = getattr(lm, attr, None)
         if value is not None:
             data[attr] = _sanitize_metadata(value)
@@ -563,7 +564,10 @@ def _serialize_lm_instance(lm: Any) -> Optional[dict]:
     if len(data) == 1 and data["class_path"] == "builtins.object":
         return None
 
-    return data
+    normalized = _normalize_lm_metadata(data)
+    if not normalized:
+        return None
+    return normalized
 
 
 def _sanitize_metadata(value: Any, depth: int = 0, max_depth: int = 4) -> Any:
@@ -579,6 +583,34 @@ def _sanitize_metadata(value: Any, depth: int = 0, max_depth: int = 4) -> Any:
     if isinstance(value, (list, tuple, set)):
         return [_sanitize_metadata(item, depth + 1, max_depth) for item in list(value)]
     return str(value)
+
+
+_ALLOWED_LM_KEYS = {
+    "model",
+    "model_name",
+    "model_id",
+    "value",
+    "class_path",
+    "kwargs",
+    "config",
+    "settings",
+}
+
+
+def _normalize_lm_metadata(data: Any) -> Optional[dict]:
+    if not isinstance(data, dict):
+        return None
+    normalized: Dict[str, Any] = {}
+    for key in _ALLOWED_LM_KEYS:
+        if key not in data:
+            continue
+        value = data[key]
+        if value is None:
+            continue
+        if isinstance(value, (dict, list)) and not value:
+            continue
+        normalized[key] = value
+    return normalized or None
 
 
 def _dig(data: dict, path: List[str]) -> Any:
@@ -651,9 +683,6 @@ def _warn_on_lm_requirements(requirements: dict) -> None:
         return
 
     message = f"The saved program expects LM '{model}'"
-    provider = requirements.get("provider")
-    if provider:
-        message += f" from provider '{provider}'"
 
     warnings.warn(
         f"{message}. Ensure your configured LM matches to get consistent behaviour.",

@@ -234,9 +234,6 @@ def _summarize_lm(lm_info: dict) -> str:
     model = lm_info.get("model") or lm_info.get("model_id") or lm_info.get("value")
     if model:
         segments.append(str(model))
-    provider = lm_info.get("provider")
-    if provider:
-        segments.append(f"provider={provider}")
     class_path = lm_info.get("class_path")
     if class_path and class_path not in segments:
         segments.append(class_path)

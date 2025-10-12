@@ -105,6 +105,7 @@ def _handle_list(repository: PackageRepository, show_details: bool) -> None:
             print(f"  Author: {package.author}")
             if package.homepage:
                 print(f"  Homepage: {package.homepage}")
+            _print_metadata_details(package.raw.get("metadata"))
             print()
         return
 
@@ -122,6 +123,9 @@ def _handle_list(repository: PackageRepository, show_details: bool) -> None:
             f"{package.slug.ljust(identifier_width)}  "
             f"{package.version.ljust(version_width)}  {description}"
         )
+        metadata_summary = _build_metadata_summary(package.raw.get("metadata"))
+        if metadata_summary:
+            print(f"{' ' * (identifier_width + version_width + 4)}{metadata_summary}")
 
 
 def _handle_install(
@@ -161,3 +165,79 @@ def _handle_install(
     if post_install_message:
         print()
         print(post_install_message)
+
+
+def _print_metadata_details(metadata: dict | None) -> None:
+    if not isinstance(metadata, dict):
+        return
+
+    program = metadata.get("program")
+    if isinstance(program, dict):
+        class_path = program.get("class_path") or program.get("class_name")
+        if class_path:
+            print(f"  Program: {class_path}")
+        modules = program.get("modules")
+        if isinstance(modules, list) and modules:
+            module_list = ", ".join(
+                entry.get("class_path", "<unknown>") for entry in modules[:5]
+            )
+            more = "..." if len(modules) > 5 else ""
+            print(f"  Components: {module_list}{more}")
+
+    lm_info = metadata.get("lm")
+    if isinstance(lm_info, dict):
+        summary = _summarize_lm(lm_info)
+        if summary:
+            print(f"  LM: {summary}")
+
+    optimizer = metadata.get("optimizer")
+    if optimizer:
+        optimizer_summary = optimizer if isinstance(optimizer, str) else optimizer.get("name")
+        if optimizer_summary:
+            print(f"  Optimizer: {optimizer_summary}")
+
+    deps = metadata.get("dependency_versions")
+    if isinstance(deps, dict) and deps.get("dspy"):
+        print(f"  DSPy Version: {deps['dspy']}")
+
+
+def _build_metadata_summary(metadata: dict | None) -> str:
+    if not isinstance(metadata, dict):
+        return ""
+
+    parts = []
+    program = metadata.get("program")
+    if isinstance(program, dict):
+        class_path = program.get("class_path") or program.get("class_name")
+        if class_path:
+            parts.append(f"program={class_path}")
+
+    lm_info = metadata.get("lm")
+    if isinstance(lm_info, dict):
+        summary = _summarize_lm(lm_info)
+        if summary:
+            parts.append(f"lm={summary}")
+
+    optimizer = metadata.get("optimizer")
+    if isinstance(optimizer, dict):
+        name = optimizer.get("name")
+        if name:
+            parts.append(f"optimizer={name}")
+    elif isinstance(optimizer, str):
+        parts.append(f"optimizer={optimizer}")
+
+    return " | ".join(parts)
+
+
+def _summarize_lm(lm_info: dict) -> str:
+    segments = []
+    model = lm_info.get("model") or lm_info.get("model_id") or lm_info.get("value")
+    if model:
+        segments.append(str(model))
+    provider = lm_info.get("provider")
+    if provider:
+        segments.append(f"provider={provider}")
+    class_path = lm_info.get("class_path")
+    if class_path and class_path not in segments:
+        segments.append(class_path)
+    return ", ".join(segments)

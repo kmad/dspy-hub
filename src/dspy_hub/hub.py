@@ -6,10 +6,11 @@ import base64
 import hashlib
 import json
 import os
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
@@ -144,6 +145,7 @@ def load_program_from_hub(
         raise RegistryError(f"Package '{identifier}' does not contain any files to load")
 
     instance = _ensure_program_instance(program)
+    _validate_program_for_load(identifier, instance, package.metadata)
     selected = _select_package_file(package, target)
 
     with TemporaryDirectory() as tmpdir:
@@ -337,18 +339,19 @@ def _package_program(
         content = output_path.read_bytes()
 
     # Extract metadata from the DSPy saved JSON
-    dspy_metadata = {}
+    saved_data: dict | None = None
+    dspy_metadata: dict = {}
     try:
         saved_data = json.loads(content.decode("utf-8"))
         if "metadata" in saved_data and isinstance(saved_data["metadata"], dict):
             dspy_metadata = saved_data["metadata"]
     except (json.JSONDecodeError, UnicodeDecodeError):
-        pass  # If we can't parse, just skip metadata extraction
+        saved_data = None  # If we can't parse, just skip metadata extraction
 
-    # Detect module type from the saved program structure
-    module_type = _detect_module_type(instance)
-    if module_type:
-        dspy_metadata["module_type"] = module_type
+    _merge_metadata_missing(
+        dspy_metadata,
+        _build_program_metadata(instance, saved_data),
+    )
 
     sha256 = hashlib.sha256(content).hexdigest()
     # Storage path will be determined by backend, but we still need a placeholder
@@ -428,26 +431,232 @@ def _guess_mime(path: str) -> str:
     return "application/octet-stream"
 
 
-def _detect_module_type(instance: Any) -> Optional[str]:
-    """
-    Detect the DSPy module type from an instance.
-    Returns a string like 'ChainOfThought', 'Predict', 'ReAct', etc.
-    Only supports built-in DSPy modules.
-    """
-    class_name = instance.__class__.__name__
+def _module_class_path(obj: Any) -> str:
+    cls = obj.__class__
+    module = getattr(cls, "__module__", "")
+    qualname = getattr(cls, "__qualname__", cls.__name__)
+    return f"{module}.{qualname}".strip(".")
 
-    # List of known DSPy predictor/module types
-    known_types = [
-        "Predict",
-        "ChainOfThought",
-        "ChainOfThoughtWithHint",
-        "ProgramOfThought",
-        "ReAct",
-        "MultiChainComparison",
+
+def _build_program_metadata(instance: Any, saved_data: dict | None) -> dict:
+    program_info: dict = {
+        "class_name": instance.__class__.__name__,
+        "class_path": _module_class_path(instance),
+    }
+
+    module_inventory = _collect_module_inventory(instance)
+    if module_inventory:
+        program_info["modules"] = module_inventory
+
+    extras: dict = {"program": program_info}
+
+    optimizer_info = _extract_optimizer_metadata(saved_data)
+    if optimizer_info:
+        extras.setdefault("optimizer", optimizer_info)
+
+    lm_info = _extract_lm_metadata(instance, saved_data)
+    if lm_info:
+        extras.setdefault("lm", lm_info)
+
+    extras.setdefault("module_type", program_info["class_path"])
+    return extras
+
+
+def _collect_module_inventory(instance: Any) -> List[dict]:
+    inventory: List[dict] = []
+    inventory.append({"name": "__root__", "class_path": _module_class_path(instance)})
+
+    try:
+        import dspy  # type: ignore
+
+        ModuleBase = getattr(dspy, "Module", None)
+    except Exception:  # pragma: no cover - optional dependency
+        ModuleBase = None
+
+    for attr, value in sorted(vars(instance).items()):
+        if value is instance:
+            continue
+        if ModuleBase is not None and isinstance(value, ModuleBase):
+            inventory.append({"name": attr, "class_path": _module_class_path(value)})
+            continue
+        if hasattr(value, "load") and hasattr(value, "save"):
+            inventory.append({"name": attr, "class_path": _module_class_path(value)})
+
+    seen: set[Tuple[str, str]] = set()
+    unique_inventory: List[dict] = []
+    for entry in inventory:
+        key = (entry["name"], entry["class_path"])
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_inventory.append(entry)
+    return unique_inventory
+
+
+def _extract_optimizer_metadata(saved_data: dict | None) -> Optional[dict]:
+    if not isinstance(saved_data, dict):
+        return None
+    candidates = [
+        saved_data.get("optimizer"),
+        saved_data.get("metadata", {}).get("optimizer"),
     ]
-
-    if class_name in known_types:
-        return class_name
-
-    # If it's a custom module, we can't auto-detect (return None)
+    for candidate in candidates:
+        if isinstance(candidate, dict) and candidate:
+            return _sanitize_metadata(candidate)
+        if isinstance(candidate, str) and candidate:
+            return {"name": candidate}
     return None
+
+
+def _extract_lm_metadata(instance: Any, saved_data: dict | None) -> Optional[dict]:
+    lm_payload = None
+    if isinstance(saved_data, dict):
+        for path in (["predict", "lm"], ["lm"], ["metadata", "lm"]):
+            lm_payload = _dig(saved_data, path)
+            if lm_payload:
+                break
+
+    serialized = _serialize_lm_payload(lm_payload)
+    if serialized:
+        return serialized
+
+    lm_instance = getattr(instance, "lm", None)
+    serialized = _serialize_lm_instance(lm_instance)
+    if serialized:
+        return serialized
+
+    try:
+        import dspy  # type: ignore
+
+        lm_from_settings = getattr(getattr(dspy, "settings", object()), "lm", None)
+        return _serialize_lm_instance(lm_from_settings)
+    except Exception:  # pragma: no cover - optional dependency
+        return None
+
+
+def _serialize_lm_payload(payload: Any) -> Optional[dict]:
+    if payload is None:
+        return None
+    if isinstance(payload, dict):
+        if not payload:
+            return None
+        return _sanitize_metadata(payload)
+    return {"value": str(payload)}
+
+
+def _serialize_lm_instance(lm: Any) -> Optional[dict]:
+    if lm is None:
+        return None
+
+    data: Dict[str, Any] = {"class_path": _module_class_path(lm)}
+    for attr in ("model", "model_name", "model_id", "provider", "api_base"):
+        value = getattr(lm, attr, None)
+        if value is not None:
+            data[attr] = _sanitize_metadata(value)
+
+    for attr in ("kwargs", "config", "settings"):
+        value = getattr(lm, attr, None)
+        if value:
+            data[attr] = _sanitize_metadata(value)
+
+    # Avoid empty dict when no additional metadata is available.
+    if len(data) == 1 and data["class_path"] == "builtins.object":
+        return None
+
+    return data
+
+
+def _sanitize_metadata(value: Any, depth: int = 0, max_depth: int = 4) -> Any:
+    if depth > max_depth:
+        return "...(truncated)..."
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, dict):
+        sanitized: Dict[str, Any] = {}
+        for key, item in value.items():
+            sanitized[str(key)] = _sanitize_metadata(item, depth + 1, max_depth)
+        return sanitized
+    if isinstance(value, (list, tuple, set)):
+        return [_sanitize_metadata(item, depth + 1, max_depth) for item in list(value)]
+    return str(value)
+
+
+def _dig(data: dict, path: List[str]) -> Any:
+    current: Any = data
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+        if current is None:
+            return None
+    return current
+
+
+def _merge_metadata_missing(target: dict, extra: dict) -> None:
+    for key, value in extra.items():
+        if key not in target or target[key] is None:
+            target[key] = value
+            continue
+        if isinstance(target[key], dict) and isinstance(value, dict):
+            _merge_metadata_missing(target[key], value)
+
+
+def _validate_program_for_load(identifier: str, instance: Any, metadata: dict) -> None:
+    if not isinstance(metadata, dict):
+        return
+
+    expected_program = metadata.get("program") if isinstance(metadata.get("program"), dict) else {}
+    expected_class_path = expected_program.get("class_path") or metadata.get("module_type")
+    if expected_class_path:
+        actual_class_path = _module_class_path(instance)
+        if actual_class_path != expected_class_path:
+            raise RegistryError(
+                f"Package '{identifier}' expects program '{expected_class_path}', "
+                f"but provided '{actual_class_path}'. Pass a matching factory."
+            )
+
+    dependency_versions = metadata.get("dependency_versions")
+    if isinstance(dependency_versions, dict):
+        _warn_on_dependency_mismatch(dependency_versions)
+
+    lm_requirements = metadata.get("lm")
+    if isinstance(lm_requirements, dict):
+        _warn_on_lm_requirements(lm_requirements)
+
+    setattr(instance, "_dspy_hub_metadata", metadata)
+
+
+def _warn_on_dependency_mismatch(required: dict) -> None:
+    required_dspy = required.get("dspy")
+    if not required_dspy:
+        return
+    try:
+        import dspy  # type: ignore
+
+        installed = getattr(dspy, "__version__", None)
+    except Exception:  # pragma: no cover - optional dependency
+        installed = None
+    if installed and installed != required_dspy:
+        warnings.warn(
+            f"This program was optimized with dspy=={required_dspy}, "
+            f"but you are running dspy=={installed}. Behaviour may differ.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+
+def _warn_on_lm_requirements(requirements: dict) -> None:
+    model = requirements.get("model") or requirements.get("model_id") or requirements.get("value")
+    if not model:
+        return
+
+    message = f"The saved program expects LM '{model}'"
+    provider = requirements.get("provider")
+    if provider:
+        message += f" from provider '{provider}'"
+
+    warnings.warn(
+        f"{message}. Ensure your configured LM matches to get consistent behaviour.",
+        RuntimeWarning,
+        stacklevel=2,
+    )

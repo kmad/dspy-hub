@@ -1,0 +1,31 @@
+{
+  "registry": {
+    "name": "DSPy Sample Registry",
+    "homepage": "https://github.com/stanfordnlp/dspy"
+  },
+  "packages": [
+    {
+      "name": "hello-agent",
+      "version": "0.1.0",
+      "description": "A minimal DSPy program that routes a greeting through an Agent pipeline.",
+      "author": "dspy-team",
+      "tags": ["example", "starter"],
+      "homepage": "https://example.com/dspy/hello-agent",
+      "metadata": {
+        "author": "Kevin Madura",
+        "model": "openai/gpt-4.1-mini",
+        "optimizer": "MIPROv2",
+        "date": "2025-10-11"
+      },
+      "hash": "88e9c8126657d01c3e0bd2b925d0ce516fe531049a5243a68019cb6cd1a20c3a",
+      "files": [
+        {
+          "source": "packages/dspy-team/hello-agent/hello_agent.py",
+          "target": "dspy-team/hello-agent/hello_agent.py",
+          "sha256": "88e9c8126657d01c3e0bd2b925d0ce516fe531049a5243a68019cb6cd1a20c3a"
+        }
+      ],
+      "post_install_message": "Add 'hello-agent' to your DSPy project and run the agent with `python dspy-team/hello-agent/hello_agent.py`."
+    }
+  ]
+}

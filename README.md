@@ -1,47 +1,76 @@
-## dspy-pkg
+## DSPy Hub
 
-`dspy-pkg` is an experimental CLI inspired by the shadcn component registry. It lets you
-browse and install curated DSPy programs (agents, pipelines, templates) from a remote
-registry. Registries can live in object storage such as Cloudflare R2, GitHub, or any
-static hosting service that can serve a JSON manifest and source files.
+DSPy Hub is the home for shareable DSPy programs. It powers
+[dspyhub.com](https://dspyhub.com) with:
 
-### Features
+- A Python SDK (`dspy_hub`) that can load and publish packages programmatically.
+- A CLI (`dspy-hub`) for browsing registries and installing packages locally.
+- A Cloudflare Worker backend that reads and writes packages to an R2 bucket.
+- A modern React frontend for discovery, login, and authoring workflows.
 
-- `dspy-pkg list` — inspect the packages exposed by a registry.
-- `dspy-pkg install <name>` — copy a package's source files into your project.
-- Registry location can be overridden via CLI flags, environment variables, or a
-  config file.
-- Bundled sample registry demonstrates the expected manifest structure.
+### Developer experience
 
-### Getting started
+- **Read for free** – anyone can explore packages with the browser UI, CLI, or SDK.
+- **Authenticated publishing** – writing back to the hub requires a developer key. Provide it
+  via the `DSPY_HUB_DEV_KEY` environment variable (CLI/SDK) or sign in through the frontend.
+- **Multiple surfaces** – use the CLI for quick installs, the SDK for automation, or the web UI
+  for curated browsing and author insights.
+
+---
+
+## Python SDK
+
+```python
+import dspy_hub
+
+people_extractor = dspy_hub.load_from_hub("dspy-team/people-extractor")
+
+package_metadata = {
+    "author": "Kevin Madura",
+    "model": "openai/gpt-4.1-mini",
+    "optimizer": "MIPROv2",
+    "date": "2025-10-11",
+    "version": "0.1.0",
+    "tags": ["example", "starter"],
+}
+
+# Requires DSPY_HUB_DEV_KEY to be set
+dspy_hub.save_to_hub("dspy-team/people-extractor", people_extractor, package_metadata)
+```
+
+`load_from_hub` materialises the package manifest and files so they can be inspected, modified,
+or repackaged. `save_to_hub` publishes back to the registry using the authenticated Cloudflare
+Worker endpoint.
+
+
+## CLI usage
 
 ```bash
 pip install -e .
 
-dspy-pkg list
-dspy-pkg install hello-agent --dest ./dspy_components
+dspy-hub list
+dspy-hub install dspy-team/hello-agent --dest ./dspy_components
 ```
 
-By default the CLI reads from the bundled sample registry located in
-`dspy_pkg/sample_registry/index.json`. To point at a custom registry, set the
-`DSPY_PKG_REGISTRY` environment variable or pass `--registry`.
+Packages are addressed as `<author>/<name>`. By default, the CLI reads from the bundled sample
+registry located at `dspy_hub/sample_registry/index.json`. Override the registry with
+`DSPY_HUB_REGISTRY`, `--registry`, or a config file stored at
+`~/.config/dspy-hub/config.json` (Linux/macOS) or its platform equivalent.
 
-```bash
-export DSPY_PKG_REGISTRY="https://my-cdn.example.com/registry/index.json"
-dspy-pkg list
-```
 
-### Registry manifest format
+## Registry manifest format
 
-Registries expose a JSON manifest with a top-level `packages` array. Each package entry
-must provide:
+Registries expose a JSON manifest with a top-level `packages` array. Each package entry must
+provide:
 
-- `name`: unique identifier.
+- `name`: package name (unique per author).
+- `author`: package namespace (e.g. team or individual).
 - `version`: semantic version string.
-- `description`: short human description.
-- `files`: list describing which source artifacts to install. Each entry requires a
-  `source` (relative to the manifest) and optionally a `target` (where it should be
-  written inside the destination directory).
+- `description`: human-friendly summary.
+- `files`: list describing which artifacts to install. Each entry requires a `source` (relative
+  to the manifest) and optionally a `target` (where it should be written inside the destination
+  directory).
+- `metadata`: arbitrary structured metadata that will be mirrored by the SDK.
 
 Example (abridged):
 
@@ -50,35 +79,83 @@ Example (abridged):
   "packages": [
     {
       "name": "hello-agent",
+      "author": "dspy-team",
       "version": "0.1.0",
       "description": "Minimal DSPy agent example",
+      "tags": ["example", "starter"],
+      "metadata": {
+        "author": "Kevin Madura",
+        "model": "openai/gpt-4.1-mini",
+        "optimizer": "MIPROv2",
+        "date": "2025-10-11"
+      },
       "files": [
-        {"source": "packages/hello-agent/hello_agent.py", "target": "hello-agent/hello_agent.py"}
+        {
+          "source": "packages/dspy-team/hello-agent/hello_agent.py",
+          "target": "dspy-team/hello-agent/hello_agent.py",
+          "sha256": "88e9c8126657d01c3e0bd2b925d0ce516fe531049a5243a68019cb6cd1a20c3a"
+        }
       ]
     }
   ]
 }
 ```
 
-### Installation destinations
 
-Packages are copied into a destination folder (default `./dspy_packages`). Each file's
-`target` is interpreted relative to that folder. Use `--dest` to override, and `--force`
-to overwrite pre-existing files.
+## Installation destinations
+
+Packages are copied into a destination folder (default `./dspy_packages`). Each file's `target`
+is interpreted relative to that folder. Use `--dest` to override and `--force` to overwrite
+pre-existing files.
 
 ```bash
-dspy-pkg install hello-agent --dest src/agents --force
+dspy-hub install dspy-team/hello-agent --dest src/agents --force
 ```
 
-### Cloudflare R2 backend
 
-The repository includes an optional Cloudflare Worker that exposes the registry
-from an R2 bucket. See `cloudflare/registry-worker/README.md` for deployment
-instructions and sample metadata.
+## Cloudflare Worker backend
 
-### Future work
+The `cloudflare/registry-worker` directory contains a Worker that serves the registry and
+exposes a write API backed by R2. Reads are anonymous; writes require a bearer token set via the
+`WRITE_API_TOKEN` secret. Endpoints:
 
-- Package metadata signing / verification.
-- Template helpers for wiring agents into an existing DSPy project.
-- Richer discovery commands (`search`, `info`, etc.).
-- Partial installs (e.g. installing specific components of a package).
+- `GET /index.json` – aggregated manifest of all packages.
+- `GET /api/packages/<author>/<name>` – raw manifest for a single package.
+- `PUT /api/packages/<author>/<name>` – publish (requires `Authorization: Bearer …`).
+
+See `cloudflare/registry-worker/README.md` for deployment instructions and seed data.
+
+
+## Web frontend
+
+`frontend/` hosts the React SPA that powers dspyhub.com. It provides:
+
+- Searchable browsing experience with author/name routes like `/dspy-team/hello-agent`.
+- Client-side login: enter your developer key in the header to enable publishing tools.
+- Configurable registry endpoint via `VITE_REPOSITORY_ENDPOINT` (defaults to bundled sample).
+
+Refer to `frontend/README.md` for local development and GitHub Pages deployment details.
+
+
+## Configuration summary
+
+| Environment variable       | Purpose                                       |
+| -------------------------- | --------------------------------------------- |
+| `DSPY_HUB_REGISTRY`        | Custom registry index (`index.json`) URL.     |
+| `DSPY_HUB_CONFIG`          | Override path to the CLI configuration file.  |
+| `DSPY_HUB_DEV_KEY`         | Developer key for publishing packages.        |
+| `WRITE_API_TOKEN` (Worker) | Secret token authorising write operations.    |
+
+
+## Sample data
+
+The repository bundles a minimal registry (`dspy_hub/sample_registry`) and matching Cloudflare
+seed files under `cloudflare/registry-worker/sample`. They demonstrate the expected directory
+layout in R2:
+
+```
+metadata/<author>/<package>.json
+packages/<author>/<package>/...
+```
+
+Use these samples to test end-to-end flows before wiring up your own storage.

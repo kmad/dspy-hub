@@ -1,14 +1,14 @@
 [project]
-name = "dspy-pkg"
+name = "dspy-hub"
 version = "0.1.0"
-description = "CLI for browsing and installing DSPy packages from a registry"
+description = "DSPy Hub CLI and SDK for browsing and publishing DSPy programs"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
 authors = [ {name = "Kevin Madura", email = "kmadura@gmail.com"}, ]
 
 [project.scripts]
-dspy-pkg = "dspy_pkg.cli:main"
+dspy-hub = "dspy_hub.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -21,4 +21,4 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-dspy_pkg = ["sample_registry/**/*"]
+dspy_hub = ["sample_registry/**/*"]

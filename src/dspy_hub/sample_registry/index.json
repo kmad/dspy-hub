@@ -1,6 +1,6 @@
 {
   "registry": {
-    "name": "DSPy Sample Registry",
+    "name": "DSPy Hub",
     "homepage": "https://github.com/stanfordnlp/dspy"
   },
   "packages": [

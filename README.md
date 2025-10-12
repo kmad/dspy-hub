@@ -21,10 +21,13 @@ DSPy Hub is the home for shareable DSPy programs. It powers
 ## Python SDK
 
 ```python
+import dspy
 import dspy_hub
 
-people_extractor = dspy_hub.load_from_hub("dspy-team/people-extractor")
+# Build an optimized program locally
+people_extractor = dspy.ChainOfThought(PeopleExtraction)
 
+# Publish it to DSPy Hub (requires DSPY_HUB_DEV_KEY)
 package_metadata = {
     "author": "Kevin Madura",
     "model": "openai/gpt-4.1-mini",
@@ -33,21 +36,32 @@ package_metadata = {
     "version": "0.1.0",
     "tags": ["example", "starter"],
 }
+dspy_hub.save_program_to_hub("dspy-team/people-extractor", people_extractor, package_metadata)
 
-# Requires DSPY_HUB_DEV_KEY to be set
-dspy_hub.save_to_hub("dspy-team/people-extractor", people_extractor, package_metadata)
+# Load it back, ready to invoke
+loaded_extractor = dspy_hub.load_program_from_hub(
+    "dspy-team/people-extractor",
+    lambda: dspy.ChainOfThought(PeopleExtraction),  # zero-arg factory that instantiates the module
+)
+print(loaded_extractor(tokens=["Italy", "recalled", "Marcello", "Cuttitta"]).extracted_people)
 ```
 
-`load_from_hub` materialises the package manifest and files so they can be inspected, modified,
-or repackaged. `save_to_hub` publishes back to the registry using the authenticated Cloudflare
-Worker endpoint.
+Need raw access to manifests or files? Reach for the lower-level helpers:
+
+```python
+package = dspy_hub.load_from_hub("dspy-team/people-extractor")
+print(package.manifest["metadata"])
+
+dspy_hub.save_to_hub("dspy-team/people-extractor", package, package_metadata)
+```
 
 
 ## CLI usage
 
-```bash
-pip install -e .
+Install the project in editable mode with [uv](https://github.com/astral-sh/uv):
 
+```bash
+uv pip install -e .
 dspy-hub list
 dspy-hub install dspy-team/people-extractor --dest ./dspy_components
 ```

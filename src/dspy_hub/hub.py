@@ -7,7 +7,9 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Any, Callable, Dict, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
@@ -101,6 +103,42 @@ def load_from_hub(
     manifest["slug"] = identifier
 
     return HubPackage(identifier=identifier, manifest=manifest, files=files)
+
+
+def load_program_from_hub(
+    identifier: str,
+    program: Any | Callable[[], Any],
+    *,
+    registry: Optional[str] = None,
+    target: Optional[str] = None,
+) -> Any:
+    """Load a serialized DSPy program from the hub into an instantiated object.
+
+    The ``program`` argument can be an existing DSPy instance or a zero-argument
+    factory (e.g. ``lambda: dspy.ChainOfThought(MyModule)``, or a ``functools.partial``)
+    that produces one. The helper will fetch the package artifact, write it to a
+    temporary location, call ``load`` on the instance, and then return the now-loaded
+    object.
+    """
+
+    package = load_from_hub(identifier, registry=registry)
+    if not package.files:
+        raise RegistryError(f"Package '{identifier}' does not contain any files to load")
+
+    instance = _ensure_program_instance(program)
+    selected = _select_package_file(package, target)
+
+    with TemporaryDirectory() as tmpdir:
+        artifact_path = Path(tmpdir) / Path(selected.target).name
+        artifact_path.write_bytes(selected.content)
+        loader = getattr(instance, "load", None)
+        if not callable(loader):
+            raise TypeError(
+                "The provided program instance does not expose a callable 'load' method"
+            )
+        loader(str(artifact_path))
+
+    return instance
 
 
 def save_to_hub(
@@ -217,8 +255,108 @@ def save_to_hub(
     return data
 
 
+def save_program_to_hub(
+    identifier: str,
+    program: Any | Callable[[], Any],
+    package_metadata: dict,
+    *,
+    registry: Optional[str] = None,
+    dev_key: Optional[str] = None,
+    artifact_name: Optional[str] = None,
+) -> dict:
+    """Serialize a DSPy program locally and publish it to the hub in one call.
+
+    ``program`` may be an instantiated DSPy module or a zero-argument factory that
+    returns one. The helper calls ``save`` under the hood, wraps the resulting
+    artifact in a :class:`HubPackage`, and forwards it to :func:`save_to_hub`.
+    """
+
+    package = _package_program(identifier, program, artifact_name=artifact_name)
+    return save_to_hub(
+        identifier,
+        package,
+        package_metadata,
+        registry=registry,
+        dev_key=dev_key,
+    )
+
+
 def _default_target(source: str) -> str:
     return source.split("/")[-1]
+
+
+def _package_program(
+    identifier: str,
+    program: Any | Callable[[], Any],
+    artifact_name: Optional[str] = None,
+) -> HubPackage:
+    instance = _ensure_program_instance(program)
+    saver = getattr(instance, "save", None)
+    if not callable(saver):
+        raise TypeError(
+            "Program must expose a callable 'save(path)' method to publish to the hub"
+        )
+
+    author, name = _split_identifier(identifier)
+    artifact_filename = artifact_name or f"{name}.json"
+
+    with TemporaryDirectory() as tmpdir:
+        output_path = Path(tmpdir) / artifact_filename
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        saver(str(output_path))
+        content = output_path.read_bytes()
+
+    sha256 = hashlib.sha256(content).hexdigest()
+    storage_path = f"packages/{author}/{name}/{artifact_filename}"
+    hub_file = HubFile(
+        source=storage_path,
+        target=artifact_filename,
+        content=content,
+        sha256=sha256,
+    )
+
+    manifest = {
+        "slug": identifier,
+        "name": name,
+        "author": author,
+        "files": [
+            {"source": storage_path, "target": artifact_filename, "sha256": sha256}
+        ],
+        "metadata": {},
+        "hash": hashlib.sha256(sha256.encode("utf-8")).hexdigest(),
+    }
+
+    return HubPackage(identifier=identifier, manifest=manifest, files=[hub_file])
+
+
+def _select_package_file(package: HubPackage, target: Optional[str]) -> HubFile:
+    if target:
+        file_map = package.file_map()
+        candidate = file_map.get(target)
+        if not candidate:
+            basename = target.split("/")[-1]
+            candidate = next(
+                (hub_file for hub_file in package.files if hub_file.target.endswith(basename)),
+                None,
+            )
+        if candidate:
+            return candidate
+        raise RegistryError(
+            f"Package '{package.identifier}' does not contain an artifact matching '{target}'"
+        )
+    return package.files[0]
+
+
+def _ensure_program_instance(program: Any | Callable[[], Any]) -> Any:
+    if callable(program) and not hasattr(program, "load"):
+        candidate = program()
+    else:
+        candidate = program
+    if not hasattr(candidate, "load"):
+        raise TypeError(
+            "Program must be an instantiated DSPy object (or factory) exposing 'load(path)'"
+        )
+    return candidate
 
 
 def _split_identifier(identifier: str) -> tuple[str, str]:

@@ -2,7 +2,14 @@
 
 from importlib.metadata import PackageNotFoundError, version
 
-from .hub import HubFile, HubPackage, load_from_hub, save_to_hub
+from .hub import (
+    HubFile,
+    HubPackage,
+    load_from_hub,
+    load_program_from_hub,
+    save_program_to_hub,
+    save_to_hub,
+)
 
 
 def __getattr__(name: str):
@@ -19,5 +26,7 @@ __all__ = [
     "HubFile",
     "HubPackage",
     "load_from_hub",
+    "load_program_from_hub",
     "save_to_hub",
+    "save_program_to_hub",
 ]

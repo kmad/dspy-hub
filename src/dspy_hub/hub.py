@@ -61,9 +61,16 @@ class HubPackage:
 def load_from_hub(
     identifier: str,
     *,
+    version: Optional[str] = None,
     registry: Optional[str] = None,
 ) -> HubPackage:
-    """Fetch package metadata and contents from the configured registry."""
+    """Fetch package metadata and contents from the configured registry.
+
+    Args:
+        identifier: Package identifier in 'author/name' format
+        version: Optional version string. If not specified, loads latest version.
+        registry: Optional custom registry URL
+    """
 
     if not identifier or "/" not in identifier:
         raise PackageNotFoundError(
@@ -73,7 +80,10 @@ def load_from_hub(
     settings = load_settings()
     registry_location = registry or settings.registry
     repository = PackageRepository(registry_location)
-    package = repository.get_package(identifier)
+
+    # Append version to identifier if specified
+    lookup_id = f"{identifier}/{version}" if version else identifier
+    package = repository.get_package(lookup_id)
 
     files: List[HubFile] = []
     manifest = dict(package.raw)
@@ -109,6 +119,7 @@ def load_program_from_hub(
     identifier: str,
     program: Any | Callable[[], Any],
     *,
+    version: Optional[str] = None,
     registry: Optional[str] = None,
     target: Optional[str] = None,
 ) -> Any:
@@ -119,9 +130,16 @@ def load_program_from_hub(
     that produces one. The helper will fetch the package artifact, write it to a
     temporary location, call ``load`` on the instance, and then return the now-loaded
     object.
+
+    Args:
+        identifier: Package identifier in 'author/name' format
+        program: DSPy program instance or factory function
+        version: Optional version string. If not specified, loads latest version.
+        registry: Optional custom registry URL
+        target: Optional specific file to load from package
     """
 
-    package = load_from_hub(identifier, registry=registry)
+    package = load_from_hub(identifier, version=version, registry=registry)
     if not package.files:
         raise RegistryError(f"Package '{identifier}' does not contain any files to load")
 

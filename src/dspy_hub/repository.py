@@ -116,6 +116,18 @@ class PackageRepository:
             raise PackageNotFoundError("Package identifier cannot be empty")
 
         identifier = identifier.strip()
+        parts = identifier.split("/")
+
+        # Check if this is a versioned request (author/name/version)
+        if len(parts) == 3:
+            author, name, version = parts
+            if not author or not name or not version:
+                raise PackageNotFoundError(
+                    f"Package identifier '{identifier}' is invalid. Expected format 'author/name' or 'author/name/version'."
+                )
+            # Fetch directly from API for specific version
+            return self._fetch_versioned_package(author, name, version)
+
         packages = self.list_packages()
 
         if "/" in identifier:
@@ -143,6 +155,18 @@ class PackageRepository:
                 f"Multiple packages share the name '{identifier}'. Use one of: {slugs}"
             )
         raise PackageNotFoundError(f"Package '{identifier}' not found in registry")
+
+    def _fetch_versioned_package(self, author: str, name: str, version: str) -> Package:
+        """Fetch a specific version directly from the API."""
+        api_path = f"api/packages/{author}/{name}/{version}"
+        try:
+            metadata_json = self._fetcher(api_path)
+            data = json.loads(metadata_json.decode("utf-8"))
+            return Package.from_dict(data)
+        except Exception as exc:
+            raise PackageNotFoundError(
+                f"Package '{author}/{name}' version '{version}' not found"
+            ) from exc
 
     # ------------------------------------------------------------------
     # Fetching artefacts

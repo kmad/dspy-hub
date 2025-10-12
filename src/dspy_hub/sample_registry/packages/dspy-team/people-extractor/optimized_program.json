@@ -1,0 +1,132 @@
+{
+  "predict": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "augmented": true,
+        "tokens": [
+          "The",
+          "European",
+          "Commission",
+          "said",
+          "on",
+          "Thursday",
+          "it",
+          "disagreed",
+          "with",
+          "German",
+          "advice",
+          "to",
+          "consumers",
+          "to",
+          "shun",
+          "British",
+          "lamb",
+          "until",
+          "scientists",
+          "determine",
+          "whether",
+          "mad",
+          "cow",
+          "disease",
+          "can",
+          "be",
+          "transmitted",
+          "to",
+          "sheep",
+          "."
+        ],
+        "reasoning": "The tokens mention \"The European Commission\" and \"German advice,\" but these refer to organizations or nationalities rather than specific people. There are no tokens that refer to specific individuals or named persons in the text.",
+        "extracted_people": []
+      },
+      {
+        "tokens": [
+          "BRUSSELS",
+          "1996-08-22"
+        ],
+        "expected_extracted_people": []
+      },
+      {
+        "tokens": [
+          "But",
+          "Fischler",
+          "agreed",
+          "to",
+          "review",
+          "his",
+          "proposal",
+          "after",
+          "the",
+          "EU",
+          "'s",
+          "standing",
+          "veterinary",
+          "committee",
+          ",",
+          "mational",
+          "animal",
+          "health",
+          "officials",
+          ",",
+          "questioned",
+          "if",
+          "such",
+          "action",
+          "was",
+          "justified",
+          "as",
+          "there",
+          "was",
+          "only",
+          "a",
+          "slight",
+          "risk",
+          "to",
+          "human",
+          "health",
+          "."
+        ],
+        "expected_extracted_people": [
+          "Fischler"
+        ]
+      },
+      {
+        "tokens": [
+          "Peter",
+          "Blackburn"
+        ],
+        "expected_extracted_people": [
+          "Peter",
+          "Blackburn"
+        ]
+      }
+    ],
+    "signature": {
+      "instructions": "Given a list of tokenized words, identify and extract any tokens that refer specifically to individual people’s names. Carefully analyze each token and any contiguous tokens that together form a person’s full name, but output each token separately without merging them into a single string. Provide a step-by-step reasoning explanation that justifies why certain tokens are considered personal names and why others are not. Return two outputs: (1) the reasoning detailing your thought process, and (2) the list of tokens referring to specific people extracted exactly as they appear in the input.",
+      "fields": [
+        {
+          "prefix": "Tokens:",
+          "description": "tokenized text"
+        },
+        {
+          "prefix": "Reasoning: Let's think step by step in order to",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Extracted People:",
+          "description": "all tokens referring to specific people extracted from the tokenized text"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "author": "Kevin Madura",
+    "dependency_versions": {
+      "python": "3.10",
+      "dspy": "3.0.3",
+      "cloudpickle": "3.1"
+    }
+  }
+}

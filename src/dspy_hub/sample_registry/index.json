@@ -5,27 +5,32 @@
   },
   "packages": [
     {
-      "name": "hello-agent",
+      "name": "people-extractor",
       "version": "0.1.0",
-      "description": "A minimal DSPy program that routes a greeting through an Agent pipeline.",
+      "description": "Optimized DSPy program that extracts individual people tokens from tokenized news wires.",
       "author": "dspy-team",
-      "tags": ["example", "starter"],
-      "homepage": "https://example.com/dspy/hello-agent",
+      "tags": ["example", "nlp", "optimized"],
+      "homepage": "https://example.com/dspy/people-extractor",
       "metadata": {
         "author": "Kevin Madura",
         "model": "openai/gpt-4.1-mini",
         "optimizer": "MIPROv2",
-        "date": "2025-10-11"
+        "date": "2025-10-11",
+        "dependency_versions": {
+          "python": "3.10",
+          "dspy": "3.0.3",
+          "cloudpickle": "3.1"
+        }
       },
-      "hash": "88e9c8126657d01c3e0bd2b925d0ce516fe531049a5243a68019cb6cd1a20c3a",
+      "hash": "1406da85d402ffafe5dff70301841b408e70d76064f2e62742296eb3edbdda5a",
       "files": [
         {
-          "source": "packages/dspy-team/hello-agent/hello_agent.py",
-          "target": "dspy-team/hello-agent/hello_agent.py",
-          "sha256": "88e9c8126657d01c3e0bd2b925d0ce516fe531049a5243a68019cb6cd1a20c3a"
+          "source": "packages/dspy-team/people-extractor/optimized_program.json",
+          "target": "dspy-team/people-extractor/optimized_program.json",
+          "sha256": "1406da85d402ffafe5dff70301841b408e70d76064f2e62742296eb3edbdda5a"
         }
       ],
-      "post_install_message": "Add 'hello-agent' to your DSPy project and run the agent with `python dspy-team/hello-agent/hello_agent.py`."
+      "post_install_message": "Load 'people-extractor' with dspy_hub.load_from_hub(\"dspy-team/people-extractor\") to inspect the optimized program JSON."
     }
   ]
 }

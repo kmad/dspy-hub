@@ -49,7 +49,7 @@ Worker endpoint.
 pip install -e .
 
 dspy-hub list
-dspy-hub install dspy-team/hello-agent --dest ./dspy_components
+dspy-hub install dspy-team/people-extractor --dest ./dspy_components
 ```
 
 Packages are addressed as `<author>/<name>`. By default, the CLI reads from the bundled sample
@@ -78,22 +78,27 @@ Example (abridged):
 {
   "packages": [
     {
-      "name": "hello-agent",
+      "name": "people-extractor",
       "author": "dspy-team",
       "version": "0.1.0",
-      "description": "Minimal DSPy agent example",
-      "tags": ["example", "starter"],
+      "description": "Optimized DSPy program that extracts individual people tokens from tokenized news wires.",
+      "tags": ["example", "nlp", "optimized"],
       "metadata": {
         "author": "Kevin Madura",
         "model": "openai/gpt-4.1-mini",
         "optimizer": "MIPROv2",
-        "date": "2025-10-11"
+        "date": "2025-10-11",
+        "dependency_versions": {
+          "python": "3.10",
+          "dspy": "3.0.3",
+          "cloudpickle": "3.1"
+        }
       },
       "files": [
         {
-          "source": "packages/dspy-team/hello-agent/hello_agent.py",
-          "target": "dspy-team/hello-agent/hello_agent.py",
-          "sha256": "88e9c8126657d01c3e0bd2b925d0ce516fe531049a5243a68019cb6cd1a20c3a"
+          "source": "packages/dspy-team/people-extractor/optimized_program.json",
+          "target": "dspy-team/people-extractor/optimized_program.json",
+          "sha256": "1406da85d402ffafe5dff70301841b408e70d76064f2e62742296eb3edbdda5a"
         }
       ]
     }
@@ -109,7 +114,7 @@ is interpreted relative to that folder. Use `--dest` to override and `--force` t
 pre-existing files.
 
 ```bash
-dspy-hub install dspy-team/hello-agent --dest src/agents --force
+dspy-hub install dspy-team/people-extractor --dest ./dspy_components --force
 ```
 
 
@@ -130,7 +135,7 @@ See `cloudflare/registry-worker/README.md` for deployment instructions and seed 
 
 `frontend/` hosts the React SPA that powers dspyhub.com. It provides:
 
-- Searchable browsing experience with author/name routes like `/dspy-team/hello-agent`.
+- Searchable browsing experience with author/name routes like `/dspy-team/people-extractor`.
 - Client-side login: enter your developer key in the header to enable publishing tools.
 - Configurable registry endpoint via `VITE_REPOSITORY_ENDPOINT` (defaults to bundled sample).
 

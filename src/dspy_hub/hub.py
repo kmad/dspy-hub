@@ -152,18 +152,25 @@ def save_to_hub(
     """Publish a package to the hub registry.
 
     Requires a developer key (set via ``DSPY_HUB_DEV_KEY`` or ``dev_key``).
+    The identifier should be just the package name (e.g., 'my-package'), not 'author/package'.
+    The author will be determined by the backend from the dev key.
     """
 
     if not isinstance(package, HubPackage):
         raise TypeError("'package' must be an instance of HubPackage returned by load_from_hub")
 
-    slug = package.identifier
-    if identifier and identifier != slug:
+    name = package.identifier
+    if identifier and identifier != name:
         raise ValueError(
             f"Identifier mismatch: expected '{package.identifier}', got '{identifier}'"
         )
 
-    author, name = _split_identifier(slug)
+    # Validate that identifier is just a name, not author/name
+    if "/" in name:
+        raise ValueError(
+            "Identifier should be the package name only (e.g., 'my-package'), "
+            "not 'author/package'. The author will be determined from your dev key."
+        )
 
     settings = load_settings()
     registry_location = registry or settings.registry
@@ -175,29 +182,26 @@ def save_to_hub(
             "pass 'dev_key' explicitly."
         )
 
+    # Merge user-provided metadata with metadata from DSPy saved file
+    merged_metadata = {**package.manifest.get("metadata", {}), **(package_metadata or {})}
+
     payload_manifest = dict(package.manifest)
-    payload_manifest["author"] = author
     payload_manifest["name"] = name
-    payload_metadata = {**(package_metadata or {})}
-    payload_manifest["version"] = payload_metadata.get(
+    payload_manifest["version"] = package_metadata.get(
         "version", payload_manifest.get("version", "0.0.0")
     )
-    payload_manifest["description"] = payload_metadata.get(
+    payload_manifest["description"] = package_metadata.get(
         "description", payload_manifest.get("description", "")
     )
-    if "tags" in payload_metadata:
-        payload_manifest["tags"] = payload_metadata["tags"]
-    payload_manifest["metadata"] = payload_metadata
+    if "tags" in package_metadata:
+        payload_manifest["tags"] = package_metadata["tags"]
+    payload_manifest["metadata"] = merged_metadata
 
     files_payload = []
     manifest_files = []
     for hub_file in package.files:
         relative_target = hub_file.target.lstrip("/")
-        if relative_target.startswith(f"{author}/"):
-            relative_target = relative_target[len(author) + 1 :]
-        if not relative_target:
-            relative_target = hub_file.target.lstrip("/") or hub_file.target
-        storage_path = hub_file.source or f"packages/{author}/{name}/{relative_target}"
+        storage_path = hub_file.source or f"packages/{name}/{relative_target}"
         manifest_files.append(
             {
                 "source": storage_path,
@@ -217,13 +221,14 @@ def save_to_hub(
 
     payload_manifest["files"] = manifest_files
 
+    # API endpoint now doesn't include author - backend will determine from dev key
     base_url = registry_location.rsplit("/", 1)[0] + "/"
-    endpoint = urljoin(base_url, f"api/packages/{author}/{name}")
+    endpoint = urljoin(base_url, f"api/packages/{name}")
 
     request_body = json.dumps(
         {
             "manifest": payload_manifest,
-            "metadata": payload_metadata,
+            "metadata": merged_metadata,
             "files": files_payload,
         }
     ).encode("utf-8")
@@ -297,7 +302,14 @@ def _package_program(
             "Program must expose a callable 'save(path)' method to publish to the hub"
         )
 
-    author, name = _split_identifier(identifier)
+    # Identifier is now just the package name (no author/)
+    name = identifier.strip()
+    if not name or "/" in name:
+        raise ValueError(
+            "Identifier should be the package name only (e.g., 'my-package'), "
+            "not 'author/package'. The author will be determined from your dev key."
+        )
+
     artifact_filename = artifact_name or f"{name}.json"
 
     with TemporaryDirectory() as tmpdir:
@@ -306,8 +318,23 @@ def _package_program(
         saver(str(output_path))
         content = output_path.read_bytes()
 
+    # Extract metadata from the DSPy saved JSON
+    dspy_metadata = {}
+    try:
+        saved_data = json.loads(content.decode("utf-8"))
+        if "metadata" in saved_data and isinstance(saved_data["metadata"], dict):
+            dspy_metadata = saved_data["metadata"]
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        pass  # If we can't parse, just skip metadata extraction
+
+    # Detect module type from the saved program structure
+    module_type = _detect_module_type(instance)
+    if module_type:
+        dspy_metadata["module_type"] = module_type
+
     sha256 = hashlib.sha256(content).hexdigest()
-    storage_path = f"packages/{author}/{name}/{artifact_filename}"
+    # Storage path will be determined by backend, but we still need a placeholder
+    storage_path = f"packages/{name}/{artifact_filename}"
     hub_file = HubFile(
         source=storage_path,
         target=artifact_filename,
@@ -316,17 +343,16 @@ def _package_program(
     )
 
     manifest = {
-        "slug": identifier,
+        "slug": name,  # Just the name now, author added by backend
         "name": name,
-        "author": author,
         "files": [
             {"source": storage_path, "target": artifact_filename, "sha256": sha256}
         ],
-        "metadata": {},
+        "metadata": dspy_metadata,
         "hash": hashlib.sha256(sha256.encode("utf-8")).hexdigest(),
     }
 
-    return HubPackage(identifier=identifier, manifest=manifest, files=[hub_file])
+    return HubPackage(identifier=name, manifest=manifest, files=[hub_file])
 
 
 def _select_package_file(package: HubPackage, target: Optional[str]) -> HubFile:
@@ -382,3 +408,28 @@ def _guess_mime(path: str) -> str:
     if path.endswith(".txt"):
         return "text/plain"
     return "application/octet-stream"
+
+
+def _detect_module_type(instance: Any) -> Optional[str]:
+    """
+    Detect the DSPy module type from an instance.
+    Returns a string like 'ChainOfThought', 'Predict', 'ReAct', etc.
+    Only supports built-in DSPy modules.
+    """
+    class_name = instance.__class__.__name__
+
+    # List of known DSPy predictor/module types
+    known_types = [
+        "Predict",
+        "ChainOfThought",
+        "ChainOfThoughtWithHint",
+        "ProgramOfThought",
+        "ReAct",
+        "MultiChainComparison",
+    ]
+
+    if class_name in known_types:
+        return class_name
+
+    # If it's a custom module, we can't auto-detect (return None)
+    return None

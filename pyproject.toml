@@ -1,11 +1,11 @@
 [project]
 name = "dspy-hub"
-version = "0.1.0"
+version = "0.1.1"
 description = "DSPy Hub CLI and SDK for browsing and publishing DSPy programs"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
-authors = [ {name = "Kevin Madura", email = "kmadura@gmail.com"}, ]
+authors = [ {name = "Kevin Madura", email = "hello@kmad.ai"}, ]
 
 [project.scripts]
 dspy-hub = "dspy_hub.cli:main"

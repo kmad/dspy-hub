@@ -30,25 +30,11 @@ dspy-hub install dspy-team/people-extractor --dest ./dspy_packages
 ```
 
 - Packages are addressed as `<author>/<name>`.
-- By default the CLI reads from the bundled sample registry at
-  `dspy_hub/sample_registry/index.json`.
-- Override the registry with `--registry`, the `DSPY_HUB_REGISTRY` environment variable, or a
-  config file (see below).
+- By default the CLI talks to `https://api.dspyhub.com/index.json`.
+- Override the registry with `--registry` or by passing a custom URL directly to the SDK helpers.
 
-### Configuration file
-
-On first run the CLI looks for a JSON config at:
-
-- macOS & Linux: `~/.config/dspy-hub/config.json`
-- Windows: `%APPDATA%\dspy-hub\config.json`
-
-A minimal config might look like:
-
-```json
-{
-  "registry": "https://example.com/index.json"
-}
-```
+Both CLI and SDK share that default. Point them at `dspy_hub/sample_registry/index.json` if you want
+to explore the bundled sample manifest offline.
 
 ## Python SDK quick start
 
@@ -88,11 +74,9 @@ derives the author namespace from the developer key.
 
 ## Environment variables
 
-| Variable            | Purpose                                                                 |
-|---------------------|-------------------------------------------------------------------------|
-| `DSPY_HUB_REGISTRY` | Override the registry index (`index.json`) used by both CLI and SDK.   |
-| `DSPY_HUB_CONFIG`   | Provide an explicit path to the JSON config file.                       |
-| `DSPY_HUB_DEV_KEY`  | Developer key required for authenticated publishing workflows.          |
+| Variable           | Purpose                                                                |
+|--------------------|------------------------------------------------------------------------|
+| `DSPY_HUB_DEV_KEY` | Developer key required for authenticated publishing workflows.         |
 
 ## Bundled sample registry
 

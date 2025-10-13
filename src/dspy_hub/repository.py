@@ -194,7 +194,9 @@ class PackageRepository:
             with urlopen(self._index_url) as response:
                 data = response.read()
         except OSError as exc:
-            raise RegistryError(f"Unable to download registry index: {exc}") from exc
+            raise RegistryError(
+                f"Unable to download registry index from {self._index_url}: {exc}"
+            ) from exc
         try:
             return json.loads(data.decode("utf-8"))
         except json.JSONDecodeError as exc:

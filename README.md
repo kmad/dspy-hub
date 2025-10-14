@@ -31,8 +31,7 @@ dspy-hub install dspy-team/people-extractor --dest ./dspy_packages
 
 - Packages are addressed as `<author>/<name>`.
 - By default the CLI talks to `https://api.dspyhub.com/index.json`.
-- Override the registry with `--registry`, by setting the `DSPY_HUB_REGISTRY` environment
-  variable, or by passing a custom URL directly to the SDK helpers.
+- Override the registry with `--registry` or by passing a custom URL directly to the SDK helpers.
 
 Both CLI and SDK share that default. Point them at `dspy_hub/sample_registry/index.json` if you want
 to explore the bundled sample manifest offline.
@@ -42,14 +41,10 @@ to explore the bundled sample manifest offline.
 Import `dspy_hub` anywhere you need to automate interactions with a registry.
 
 ```python
-import dspy
 import dspy_hub
 
 # Load a published program straight into a DSPy module
-module = dspy_hub.load_program_from_hub(
-    "dspy-team/people-extractor",
-    lambda: dspy.ChainOfThought(PeopleExtraction),
-)
+program = dspy_hub.load_program_from_hub("dspy-team/people-extractor")
 
 # Inspect raw manifests or file payloads
 package = dspy_hub.load_from_hub("dspy-team/people-extractor")
@@ -67,25 +62,30 @@ metadata = {
     "description": "Optimized DSPy program that extracts people names.",
     "tags": ["example", "demo"],
 }
-dspy_hub.save_program_to_hub("people-extractor", my_program, metadata, registry="https://example.com")
+dspy_hub.save_program_to_hub(
+    "people-extractor",
+    my_program,
+    metadata,
+    registry="https://example.com",
+)
 ```
+
+Need to bundle local helper modules? Pass them via `modules_to_serialize`, e.g. `modules_to_serialize=[my_helpers]`.
 
 The identifier should be the package name only when publishing (`"people-extractor"`); the hub
 derives the author namespace from the developer key.
 
 ## Environment variables
 
-| Variable             | Purpose                                                                 |
-|----------------------|-------------------------------------------------------------------------|
-| `DSPY_HUB_REGISTRY`  | Override the registry index location (URL or local path).               |
-| `DSPY_HUB_DEV_KEY`   | Developer key required for authenticated publishing workflows.         |
+| Variable           | Purpose                                                                |
+|--------------------|------------------------------------------------------------------------|
+| `DSPY_HUB_DEV_KEY` | Developer key required for authenticated publishing workflows.         |
 
 ## Bundled sample registry
 
 The package includes a miniature registry under `dspy_hub/sample_registry/`. Point the CLI or SDK
-to it (for example, `dspy-hub list --registry dspy_hub/sample_registry/index.json` or by exporting
-`DSPY_HUB_REGISTRY=dspy_hub/sample_registry/index.json`) to explore the package format without
-standing up a server. The sample contains:
+to it (or leave the defaults) to explore the package format without standing up a server. The
+sample contains:
 
 - `index.json`: manifest of available packages.
 - `packages/<author>/<name>/...`: artifact payloads referenced by the manifest.

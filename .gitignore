@@ -1,0 +1,3 @@
+dist/
+src/dspy_hub/__pycache__/
+src/dspy_hub.egg-info/

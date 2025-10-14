@@ -6,11 +6,13 @@ import base64
 import hashlib
 import json
 import os
+import shutil
 import warnings
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
@@ -118,47 +120,68 @@ def load_from_hub(
 
 def load_program_from_hub(
     identifier: str,
-    program: Any | Callable[[], Any],
+    program: Any | Callable[[], Any] | None = None,
     *,
     version: Optional[str] = None,
     registry: Optional[str] = None,
     target: Optional[str] = None,
 ) -> Any:
-    """Load a serialized DSPy program from the hub into an instantiated object.
+    """Load a serialized DSPy program from the hub.
 
-    The ``program`` argument can be an existing DSPy instance or a zero-argument
-    factory (e.g. ``lambda: dspy.ChainOfThought(MyModule)``, or a ``functools.partial``)
-    that produces one. The helper will fetch the package artifact, write it to a
-    temporary location, call ``load`` on the instance, and then return the now-loaded
-    object.
+    By default this helper restores the artifact directly with ``dspy.load`` using
+    DSPy's whole-program serialization. For legacy JSON packages—or when you prefer
+    to control instantiation—provide an existing DSPy instance or a zero-argument
+    factory (e.g. ``lambda: dspy.ChainOfThought(MyModule)``). The helper fetches the
+    artifact, materializes it locally, and either calls ``dspy.load`` or invokes the
+    instance's ``load`` method depending on the provided arguments.
 
     Args:
         identifier: Package identifier in 'author/name' format
-        program: DSPy program instance or factory function
+        program: Optional DSPy program instance or zero-argument factory for legacy artifacts
         version: Optional version string. If not specified, loads latest version.
         registry: Optional custom registry URL
         target: Optional specific file to load from package
     """
 
     package = load_from_hub(identifier, version=version, registry=registry)
+    metadata = package.metadata if isinstance(package.metadata, dict) else {}
     if not package.files:
         raise RegistryError(f"Package '{identifier}' does not contain any files to load")
 
-    instance = _ensure_program_instance(program)
-    _validate_program_for_load(identifier, instance, package.metadata)
     selected = _select_package_file(package, target)
 
     with TemporaryDirectory() as tmpdir:
         artifact_path = Path(tmpdir) / Path(selected.target).name
         artifact_path.write_bytes(selected.content)
+        load_target, artifact_kind = _materialize_artifact(artifact_path)
+
+        if program is None:
+            if artifact_kind == "legacy_file":
+                raise RegistryError(
+                    "This package was published with a legacy format. "
+                    "Pass a DSPy program instance (or factory) to load it."
+                )
+            try:
+                import dspy  # type: ignore
+            except Exception as exc:
+                raise RegistryError(
+                    "Loading DSPy programs without providing an instance requires the 'dspy' "
+                    "package to be installed."
+                ) from exc
+
+            loaded_program = dspy.load(str(load_target))
+            _validate_program_for_load(identifier, loaded_program, metadata)
+            return loaded_program
+
+        instance = _ensure_program_instance(program)
+        _validate_program_for_load(identifier, instance, metadata)
         loader = getattr(instance, "load", None)
         if not callable(loader):
             raise TypeError(
                 "The provided program instance does not expose a callable 'load' method"
             )
-        loader(str(artifact_path))
-
-    return instance
+        loader(str(load_target))
+        return instance
 
 
 def save_to_hub(
@@ -288,15 +311,23 @@ def save_program_to_hub(
     registry: Optional[str] = None,
     dev_key: Optional[str] = None,
     artifact_name: Optional[str] = None,
+    modules_to_serialize: Optional[Sequence[Any]] = None,
 ) -> dict:
     """Serialize a DSPy program locally and publish it to the hub in one call.
 
     ``program`` may be an instantiated DSPy module or a zero-argument factory that
-    returns one. The helper calls ``save`` under the hood, wraps the resulting
-    artifact in a :class:`HubPackage`, and forwards it to :func:`save_to_hub`.
+    returns one. The helper invokes ``program.save(..., save_program=True)`` to
+    capture the full architecture and state, zips the saved directory, and forwards
+    the archive to :func:`save_to_hub`. Pass any custom modules needed at load time
+    via ``modules_to_serialize`` so DSPy bundles them with the program.
     """
 
-    package = _package_program(identifier, program, artifact_name=artifact_name)
+    package = _package_program(
+        identifier,
+        program,
+        artifact_name=artifact_name,
+        modules_to_serialize=modules_to_serialize,
+    )
     return save_to_hub(
         identifier,
         package,
@@ -314,6 +345,7 @@ def _package_program(
     identifier: str,
     program: Any | Callable[[], Any],
     artifact_name: Optional[str] = None,
+    modules_to_serialize: Optional[Sequence[Any]] = None,
 ) -> HubPackage:
     instance = _ensure_program_instance(program)
     saver = getattr(instance, "save", None)
@@ -330,28 +362,45 @@ def _package_program(
             "not 'author/package'. The author will be determined from your dev key."
         )
 
-    artifact_filename = artifact_name or f"{name}.json"
+    artifact_filename = artifact_name or f"{name}.zip"
+    if not artifact_filename.endswith(".zip"):
+        artifact_filename = f"{artifact_filename}.zip"
 
     with TemporaryDirectory() as tmpdir:
-        output_path = Path(tmpdir) / artifact_filename
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        saver(str(output_path))
-        content = output_path.read_bytes()
+        program_dir = Path(tmpdir) / "program"
+        program_dir.mkdir(parents=True, exist_ok=True)
+        saver(
+            str(program_dir),
+            save_program=True,
+            modules_to_serialize=modules_to_serialize,
+        )
 
-    # Extract metadata from the DSPy saved JSON
-    saved_data: dict | None = None
-    dspy_metadata: dict = {}
-    try:
-        saved_data = json.loads(content.decode("utf-8"))
-        if "metadata" in saved_data and isinstance(saved_data["metadata"], dict):
-            dspy_metadata = saved_data["metadata"]
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        saved_data = None  # If we can't parse, just skip metadata extraction
+        saved_data = _load_saved_program_metadata(program_dir)
+        if isinstance(saved_data, dict) and isinstance(saved_data.get("metadata"), dict):
+            dspy_metadata: dict = dict(saved_data["metadata"])
+        else:
+            dspy_metadata = saved_data if isinstance(saved_data, dict) else {}
 
-    _merge_metadata_missing(
-        dspy_metadata,
-        _build_program_metadata(instance, saved_data),
-    )
+        _merge_metadata_missing(
+            dspy_metadata,
+            _build_program_metadata(instance, saved_data),
+        )
+
+        archive_base = Path(tmpdir) / "artifact"
+        archive_path = Path(
+            shutil.make_archive(
+                str(archive_base),
+                "zip",
+                root_dir=program_dir.parent,
+                base_dir=program_dir.name,
+            )
+        )
+
+        final_archive = archive_path
+        if archive_path.name != artifact_filename:
+            final_archive = archive_path.with_name(artifact_filename)
+            archive_path.rename(final_archive)
+        content = final_archive.read_bytes()
 
     sha256 = hashlib.sha256(content).hexdigest()
     # Storage path will be determined by backend, but we still need a placeholder
@@ -374,6 +423,58 @@ def _package_program(
     }
 
     return HubPackage(identifier=name, manifest=manifest, files=[hub_file])
+
+
+def _load_saved_program_metadata(program_dir: Path) -> Optional[dict]:
+    metadata_candidates = [
+        program_dir / "metadata.json",
+        program_dir / "manifest.json",
+    ]
+    for metadata_file in metadata_candidates:
+        if not metadata_file.is_file():
+            continue
+        try:
+            data = json.loads(metadata_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
+
+
+def _materialize_artifact(artifact_path: Path) -> Tuple[Path, str]:
+    if zipfile.is_zipfile(artifact_path):
+        extract_root = artifact_path.parent / "program"
+        extract_root.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(artifact_path) as archive:
+            archive.extractall(extract_root)
+
+        program_dir = _locate_program_directory(extract_root)
+        if program_dir is None:
+            raise RegistryError(
+                "Extracted archive does not contain a recognizable DSPy program directory"
+            )
+        return program_dir, "program_dir"
+
+    return artifact_path, "legacy_file"
+
+
+def _locate_program_directory(root: Path) -> Optional[Path]:
+    if not root.exists():
+        return None
+    if (root / "metadata.json").is_file() or (root / "manifest.json").is_file():
+        return root
+
+    subdirs = sorted(child for child in root.iterdir() if child.is_dir())
+    if len(subdirs) == 1:
+        candidate = _locate_program_directory(subdirs[0])
+        if candidate is not None:
+            return candidate
+    for subdir in subdirs:
+        candidate = _locate_program_directory(subdir)
+        if candidate is not None:
+            return candidate
+    return None
 
 
 def _select_package_file(package: HubPackage, target: Optional[str]) -> HubFile:
@@ -420,6 +521,8 @@ def _split_identifier(identifier: str) -> tuple[str, str]:
 
 
 def _guess_mime(path: str) -> str:
+    if path.endswith(".zip"):
+        return "application/zip"
     if path.endswith(".json"):
         return "application/json"
     if path.endswith(".py"):

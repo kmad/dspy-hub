@@ -20,17 +20,20 @@
           "python": "3.10",
           "dspy": "3.0.3",
           "cloudpickle": "3.1"
+        },
+        "lm": {
+          "model": "openai/gpt-4.1-mini"
         }
       },
-      "hash": "1406da85d402ffafe5dff70301841b408e70d76064f2e62742296eb3edbdda5a",
+      "hash": "83ddc399b7f937538e66c100b3b915976097e1b0bcef16fb017f15f0c9f7cd86",
       "files": [
         {
-          "source": "packages/dspy-team/people-extractor/optimized_program.json",
-          "target": "dspy-team/people-extractor/optimized_program.json",
-          "sha256": "1406da85d402ffafe5dff70301841b408e70d76064f2e62742296eb3edbdda5a"
+          "source": "packages/dspy-team/people-extractor/optimized_program.zip",
+          "target": "optimized_program.zip",
+          "sha256": "0799743bef7ccd5f432a0d42c8d6f6057426ecb6685ab582a48bee11a423a8c5"
         }
       ],
-      "post_install_message": "Load 'people-extractor' with dspy_hub.load_from_hub(\"dspy-team/people-extractor\") to inspect the optimized program JSON."
+      "post_install_message": "Load 'people-extractor' with dspy_hub.load_program_from_hub(\"dspy-team/people-extractor\") to restore the optimized program."
     }
   ]
 }

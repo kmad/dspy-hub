@@ -14,7 +14,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from urllib.error import HTTPError, URLError
-from urllib.parse import urljoin
+from urllib.parse import urlencode, urljoin
 from urllib.request import Request, urlopen
 
 from .config import load_settings
@@ -303,6 +303,64 @@ def save_to_hub(
     return data
 
 
+def delete_package(
+    identifier: str,
+    *,
+    registry: Optional[str] = None,
+    dev_key: Optional[str] = None,
+    version: Optional[str] = None,
+) -> dict:
+    """Delete a package (or a single version) from the hub registry."""
+
+    package_name = _normalize_package_name(identifier)
+
+    settings = load_settings()
+    registry_location = registry or settings.registry
+
+    dev_token = dev_key or os.getenv(DEV_KEY_ENV)
+    if not dev_token:
+        raise RegistryError(
+            "DSPY Hub dev key missing. Set the DSPY_HUB_DEV_KEY environment variable or "
+            "pass 'dev_key' explicitly."
+        )
+
+    base_url = registry_location.rsplit("/", 1)[0] + "/"
+    version_param = version.strip() if isinstance(version, str) else None
+    endpoint = urljoin(base_url, f"api/packages/{package_name}")
+    if version_param:
+        endpoint = f"{endpoint}?{urlencode({'version': version_param})}"
+
+    request = Request(
+        endpoint,
+        method="DELETE",
+        headers={
+            "authorization": f"Bearer {dev_token}",
+        },
+    )
+
+    try:
+        with urlopen(request) as response:
+            response_body = response.read().decode("utf-8")
+    except HTTPError as exc:  # pragma: no cover - network errors
+        message = exc.read().decode("utf-8", errors="ignore") or exc.reason
+        raise RegistryError(f"Failed to delete package: {message}") from exc
+    except URLError as exc:  # pragma: no cover - network errors
+        raise RegistryError(f"Failed to reach registry endpoint: {exc}") from exc
+
+    if not response_body:
+        return {"success": True}
+
+    try:
+        data = json.loads(response_body)
+    except json.JSONDecodeError as exc:  # pragma: no cover - unexpected
+        raise RegistryError("Registry returned invalid JSON response") from exc
+
+    if not data.get("success") and data.get("error"):
+        raise RegistryError(f"Failed to delete package: {data['error']}")
+
+    return data
+
+
 def save_program_to_hub(
     identifier: str,
     program: Any | Callable[[], Any],
@@ -423,6 +481,27 @@ def _package_program(
     }
 
     return HubPackage(identifier=name, manifest=manifest, files=[hub_file])
+
+
+def _normalize_package_name(identifier: str) -> str:
+    slug = (identifier or "").strip()
+    if not slug:
+        raise RegistryError("Package identifier cannot be empty")
+
+    parts = slug.split("/")
+    if len(parts) == 1:
+        name = parts[0].strip()
+    elif len(parts) == 2 and parts[1].strip():
+        name = parts[1].strip()
+    else:
+        raise RegistryError(
+            "Package identifier must be the package name or in the form 'author/name'"
+        )
+
+    if not name or "/" in name:
+        raise RegistryError("Package name cannot be empty or contain '/' characters")
+
+    return name
 
 
 def _load_saved_program_metadata(program_dir: Path) -> Optional[dict]:

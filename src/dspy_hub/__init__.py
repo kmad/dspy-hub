@@ -5,6 +5,7 @@ from importlib.metadata import PackageNotFoundError, version
 from .hub import (
     HubFile,
     HubPackage,
+    delete_package,
     load_from_hub,
     load_program_from_hub,
     save_program_to_hub,
@@ -29,4 +30,5 @@ __all__ = [
     "load_program_from_hub",
     "save_to_hub",
     "save_program_to_hub",
+    "delete_package",
 ]

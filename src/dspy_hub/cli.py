@@ -10,6 +10,7 @@ from textwrap import indent
 from .config import load_settings
 from .exceptions import InstallationError, PackageNotFoundError, RegistryError
 from .installer import InstallOptions, Installer
+from .hub import delete_package
 from .repository import PackageRepository
 
 
@@ -54,6 +55,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show what would be installed without writing any files",
     )
 
+    delete_parser = subparsers.add_parser("delete", help="Delete a package you own from the registry")
+    delete_parser.add_argument(
+        "package_identifier",
+        help="Name of the package to delete (e.g. my-package or author/my-package)",
+    )
+    delete_parser.add_argument(
+        "--version",
+        help="Delete only a specific version (deletes entire package if omitted)",
+    )
+
     return parser
 
 
@@ -77,6 +88,14 @@ def main(argv: list[str] | None = None) -> int:
                 destination=args.dest,
                 force=args.force,
                 dry_run=args.dry_run,
+            )
+            return 0
+
+        if args.command == "delete":
+            _handle_delete(
+                registry_location=registry_location,
+                package_identifier=args.package_identifier,
+                version=args.version,
             )
             return 0
 
@@ -158,6 +177,39 @@ def _handle_install(
         f"Installed {package.slug} ({package.version}) "
         f"to {destination_path.resolve()}"
     )
+
+
+def _handle_delete(
+    registry_location: str,
+    package_identifier: str,
+    version: str | None,
+) -> None:
+    trimmed_version = version.strip() if isinstance(version, str) else None
+
+    response = delete_package(
+        package_identifier,
+        registry=registry_location,
+        version=trimmed_version or None,
+    )
+
+    identifier = response.get("identifier") or package_identifier
+
+    if response.get("packageDeleted"):
+        if trimmed_version:
+            print(f"Deleted version {trimmed_version} of {identifier}. Package removed from registry.")
+        else:
+            print(f"Deleted {identifier} from registry.")
+        return
+
+    if trimmed_version:
+        latest = response.get("latestVersion")
+        if latest:
+            print(f"Deleted version {trimmed_version} of {identifier}. Latest version is now {latest}.")
+        else:
+            print(f"Deleted version {trimmed_version} of {identifier}.")
+        return
+
+    print(f"Deleted {identifier} from registry.")
     for path in planned:
         print(f"  {path}")
 
